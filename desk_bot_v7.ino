@@ -118,9 +118,8 @@ const BuzzerNote SND_BOOT[] = {{1047, 40, 80}, {1319, 35, 70}, {1568, 35, 70},
                                {2093, 30, 60}, {1760, 35, 80}, {2093, 45, 0},
                                {0, 0, 0}};
 
-// Notification — wind-chime sparkle: high shimmer → warm landing
-const BuzzerNote SND_NOTIF[] = {
-    {2637, 30, 60}, {2093, 35, 70}, {1568, 40, 80}, {2093, 45, 0}, {0, 0, 0}};
+// Notification — single sweet "ding!" ping
+const BuzzerNote SND_NOTIF[] = {{2093, 30, 0}, {0, 0, 0}};
 
 // Reminder — soft triple chime: ping ping ping
 const BuzzerNote SND_REMIND[] = {
@@ -1756,7 +1755,7 @@ void loop() {
       }
       if (!isDriftingOff && el > (SLEEP_TIMEOUT - 2000)) {
         isDriftingOff = true;
-        buzzerPlay(SND_SLEEP);
+        if (!buzzerPlaying) buzzerPlay(SND_SLEEP); // play only once
         targetEyeOpenFactor = 0;
         targetYawnFactor = 0;
         targetMouthX = 0;
@@ -4117,7 +4116,7 @@ void updateAttentionSeeking(unsigned long now) {
     attentionStage = 4;
     lastAttentionEscalate = now;
     fakeSnoring = true;
-    buzzerPlay(SND_SLEEP);
+    if (!buzzerPlaying) buzzerPlay(SND_SLEEP); // play only once
     Serial.println("Attention stage 4: fake sleeping");
   }
 
@@ -5207,7 +5206,15 @@ void parseGBPacket(String json) {
 
     showNotif = true;
     notifEnd = millis() + NOTIF_DURATION;
-    buzzerPlay(SND_NOTIF); // notification beep
+    lastInteractionTime = millis(); // reset idle timer — stops yawn/sleep/attention sounds
+
+    // Sound cooldown — Gadgetbridge sends multiple packets per notification
+    // Only ding once per 2 seconds to avoid repeated buzzing
+    static unsigned long lastNotifSoundAt = 0;
+    if (millis() - lastNotifSoundAt > 2000) {
+      buzzerPlay(SND_NOTIF); // notification beep
+      lastNotifSoundAt = millis();
+    }
 
     // ---- MOOD REACTION BASED ON APP ----
     // Wake up from sleep/clock if needed
@@ -5224,11 +5231,10 @@ void parseGBPacket(String json) {
     srcLower.toLowerCase();
 
     // Jealousy trigger: if bot was in love/happy mode when notification arrives
-    if (currentMode == 1 || currentMode == 0) {
+    if (currentMode == 1) {
       isJealous = true;
       jealousyEnd = millis() + 3000;
       jealousyPhase = 0;
-      buzzerPlay(SND_JEALOUS);
     }
 
     if (srcLower.indexOf("whatsapp") >= 0 ||
