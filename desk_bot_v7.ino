@@ -68,6 +68,12 @@ Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define WHITE SH110X_WHITE
 #define BLACK SH110X_BLACK
 
+// ================= SOUND MUTE TOGGLE =================
+// Triple-tap on clock/weather screen toggles sound on/off
+bool soundEnabled = true;
+bool showMuteOverlay = false;     // brief "SOUND ON/OFF" confirmation
+unsigned long muteOverlayEnd = 0;
+
 // ================= BUZZER SYSTEM =================
 // Non-blocking tone sequencer using ESP32 LEDC PWM
 #define BUZZER_LEDC_CH 0
@@ -326,6 +332,8 @@ unsigned long buzzerLoopEnd = 0; // auto-stop looping at this time
 // Start playing a pattern (non-blocking)
 void buzzerPlay(const BuzzerNote *pattern, bool loop = false,
                 unsigned long loopDurationMs = 0) {
+  // Sound mute gate — skip all sounds when muted
+  if (!soundEnabled) return;
   buzzerPattern = pattern;
   buzzerNoteIdx = 0;
   buzzerPlaying = true;
@@ -1191,6 +1199,8 @@ void updateHeartbeat();
 void triggerYawn(int dur);
 void registerBeatHit();
 void updateBeat(unsigned long now);
+void drawDeathScene(unsigned long now);
+void drawSpeakerIcon(int x, int y, bool muted);
 void drawHeart(int x, int y, float s);
 void drawStar(int cx, int cy, int r);
 void drawSweatDrop(int x, int y);
@@ -2217,6 +2227,8 @@ mood_done:;
     showNotif = false;
   if (showMusicPopup && now > musicPopupEnd)
     showMusicPopup = false;
+  if (showMuteOverlay && now > muteOverlayEnd)
+    showMuteOverlay = false;
   if (showMusic && now > musicEnd) {
     showMusic = false;
     if (!musicPlaying)
@@ -2491,6 +2503,24 @@ mood_done:;
       if (t >= 1.0f) {
         screenTransActive = false; // done!
       }
+    }
+  }
+
+  // ---- MUTE TOGGLE OVERLAY — brief confirmation on sound toggle ----
+  if (showMuteOverlay) {
+    // Centered rounded rect with "SOUND ON" or "SOUND OFF" + speaker icon
+    display.fillRoundRect(14, 18, 100, 28, 6, BLACK);
+    display.drawRoundRect(14, 18, 100, 28, 6, WHITE);
+    display.drawRoundRect(15, 19, 98, 26, 5, WHITE);
+    drawSpeakerIcon(22, 26, !soundEnabled);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    if (soundEnabled) {
+      display.setCursor(40, 28);
+      display.print("SOUND ON");
+    } else {
+      display.setCursor(40, 28);
+      display.print("SOUND OFF");
     }
   }
 
@@ -3218,8 +3248,21 @@ void handleInput() {
         startScreenTransition(8);
       }
     } else if (tapCount == 3) {
-      triggerStartleChain();
-    } // multi-phase startle reaction
+      // Triple-tap on clock/weather = toggle sound mute
+      if (currentMode == 8 || currentMode == 9) {
+        soundEnabled = !soundEnabled;
+        if (soundEnabled) {
+          buzzerPlay(SND_CLICK); // confirmation beep (only plays if now unmuted)
+        } else {
+          buzzerStop(); // silence any playing sound immediately
+        }
+        showMuteOverlay = true;
+        muteOverlayEnd = now + 1500;
+        Serial.println(soundEnabled ? "Sound ON" : "Sound OFF");
+      } else {
+        triggerStartleChain();
+      }
+    } // multi-phase startle reaction / sound toggle
     else if (tapCount == 4) {
       isLaughing = true;
       laughEndTime = now + 4000;
@@ -6621,4 +6664,24 @@ void animateClouds() {
   drawMainCloud((int)mainCloudX, 20);
   drawSmallCloud((int)smallCloud1X, 16);
   drawSmallCloud((int)smallCloud2X, 30);
+}
+
+// ================= SPEAKER ICON =================
+// Draws a tiny speaker icon at (x,y). If muted=true, draws an X over it.
+// Icon is ~12x10 pixels. (x,y) is top-left of the speaker body.
+void drawSpeakerIcon(int x, int y, bool muted) {
+  // Speaker body (small rectangle)
+  display.fillRect(x, y + 2, 4, 6, WHITE);
+  // Speaker cone (triangle)
+  display.fillTriangle(x + 4, y, x + 4, y + 9, x + 9, y + 5, WHITE);
+  if (!muted) {
+    // Sound waves (arcs approximated with pixels)
+    display.drawPixel(x + 11, y + 3, WHITE);
+    display.drawPixel(x + 11, y + 7, WHITE);
+    display.drawPixel(x + 12, y + 5, WHITE);
+  } else {
+    // Mute X over the speaker
+    display.drawLine(x + 10, y + 1, x + 14, y + 9, WHITE);
+    display.drawLine(x + 14, y + 1, x + 10, y + 9, WHITE);
+  }
 }
